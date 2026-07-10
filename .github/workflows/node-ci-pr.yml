@@ -5,3 +5,5 @@ on:
 jobs:
   call-ci-workflow:
     uses: ixofoundation/ixo-github-actions/.github/workflows/node-ci-pr.yml@main
+    with:
+      package_manager: 'npm'
