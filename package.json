@@ -1,0 +1,52 @@
+{
+  "name": "ixo-blocksync-api",
+  "version": "0.1.0",
+  "description": "Read-only, horizontally-scalable GraphQL + REST query API for the ixo blocksync database (PostGraphile 5)",
+  "type": "module",
+  "main": "build/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node build/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": "https://github.com/ixofoundation/ixo-blocksync-api",
+  "keywords": [
+    "blockchain",
+    "graphql",
+    "postgraphile"
+  ],
+  "author": "Ixo Foundation",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@graphile/pg-aggregates": "0.2.0-rc.2",
+    "@graphile/simplify-inflection": "^8.0.0",
+    "@ixo/impactxclient-sdk": "^3.0.1",
+    "axios": "^1.18.1",
+    "axios-retry": "^4.5.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "dataloader": "^2.2.3",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.5.2",
+    "graphql": "^16.14.2",
+    "helmet": "^8.2.0",
+    "limiter": "^3.0.0",
+    "long": "^5.3.2",
+    "pg": "^8.16.3",
+    "postgraphile": "^5.0.3",
+    "postgraphile-plugin-connection-filter": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/node": "^22.19.1",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3"
+  }
+}
