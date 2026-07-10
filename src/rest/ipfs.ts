@@ -65,15 +65,38 @@ const getIpfsDocument = async (
 
 export const ipfsRouter = Router();
 
-// Same contract as ixo-blocksync GET /api/ipfs/:cid
+// Only content types that are safe to render inline from the API origin are
+// forwarded as-is. Anything else - notably image/svg+xml and other XML types,
+// which execute scripts in browsers - is served as a generic byte stream so
+// attacker-pinned IPFS content can never run code on this origin. Images stay
+// hot-linkable (clients embed these URLs as <img src>).
+const INLINE_SAFE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "application/json",
+  "application/pdf",
+  "text/plain",
+  "video/mp4",
+  "audio/mpeg",
+]);
+
+// Same contract as ixo-blocksync GET /api/ipfs/:cid (hardened headers)
 ipfsRouter.get("/api/ipfs/:cid", async (req, res) => {
   try {
     const doc = await getIpfsDocument(req.params.cid);
     if (!doc || "error" in doc) throw new Error("Document not found");
     const buf = Buffer.from(doc.data);
+    const baseType = doc.contentType.split(";")[0].trim().toLowerCase();
     res.writeHead(200, {
-      "Content-Type": doc.contentType,
+      "Content-Type": INLINE_SAFE_TYPES.has(baseType)
+        ? doc.contentType
+        : "application/octet-stream",
       "Content-Length": buf.length,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
     });
     res.end(buf);
   } catch (error: any) {
