@@ -13,9 +13,13 @@ export const pool = new pg.Pool({
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 8_000,
   // Generous backstop only: GraphQL SQL is capped per-transaction via
-  // pgSettings (STATEMENT_TIMEOUT_MS). This must stay high enough for
-  // PostGraphile's schema introspection at boot on a busy database.
-  statement_timeout: 30_000,
+  // pgSettings (STATEMENT_TIMEOUT_MS). query_timeout is enforced CLIENT-side
+  // by node-postgres - deliberately NOT the server `statement_timeout` pool
+  // option, which node-pg sends as a startup packet parameter that pgbouncer
+  // rejects ("unsupported startup parameter"); production connects through
+  // pgbouncer. Must stay high enough for PostGraphile's schema introspection
+  // at boot on a busy database.
+  query_timeout: 30_000,
   ...(DATABASE_USE_SSL ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 

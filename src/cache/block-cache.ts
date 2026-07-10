@@ -2,7 +2,7 @@ import pg from 'pg';
 import { createHash } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { pool } from '../db.js';
-import { BLOCK_CACHE, BLOCK_CACHE_CHANNEL, BLOCK_CACHE_MAX_ENTRIES, BLOCK_CACHE_MAX_ENTRY_BYTES, BLOCK_CACHE_BACKSTOP_MS, DATABASE_URL, DATABASE_USE_SSL } from '../env.js';
+import { BLOCK_CACHE, BLOCK_CACHE_CHANNEL, BLOCK_CACHE_LISTEN_DATABASE_URL, BLOCK_CACHE_MAX_ENTRIES, BLOCK_CACHE_MAX_ENTRY_BYTES, BLOCK_CACHE_BACKSTOP_MS, DATABASE_USE_SSL } from '../env.js';
 
 // ---------------------------------------------------------------------------
 // Block-aware response cache.
@@ -130,18 +130,24 @@ export const startBlockCacheInvalidator = (): void => {
 
 	let lastSeenHeight: string | null = null;
 	let reconnectTimer: NodeJS.Timeout | null = null;
+	let attempts = 0;
 	const scheduleReconnect = () => {
 		if (reconnectTimer) return;
+		// back off after repeated failures (e.g. LISTEN is impossible through
+		// pgbouncer transaction pooling) - the poll backstop keeps the cache
+		// correct meanwhile, so don't spam reconnects/logs
+		const delay = attempts < 3 ? 2000 : 30000;
 		reconnectTimer = setTimeout(() => {
 			reconnectTimer = null;
 			connect();
-		}, 2000);
+		}, delay);
 	};
 
 	const connect = async () => {
+		attempts++;
 		const client = new pg.Client({
 			application_name: 'Blocksync-api-cache',
-			connectionString: DATABASE_URL,
+			connectionString: BLOCK_CACHE_LISTEN_DATABASE_URL,
 			...(DATABASE_USE_SSL ? { ssl: { rejectUnauthorized: false } } : {}),
 		});
 		client.on('error', err => {
@@ -161,6 +167,7 @@ export const startBlockCacheInvalidator = (): void => {
 		try {
 			await client.connect();
 			await client.query(`LISTEN "${BLOCK_CACHE_CHANNEL}"`);
+			attempts = 0;
 			// anything cached while we weren't listening is unverifiable - drop it
 			clearBlockCache();
 			console.log(`block-cache: listening for new blocks on "${BLOCK_CACHE_CHANNEL}"`);

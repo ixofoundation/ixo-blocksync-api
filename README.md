@@ -35,6 +35,12 @@ Notes:
 - `DATABASE_USE_SSL=1` connects with `rejectUnauthorized: false` to match how
   ixo-blocksync connects to the managed cluster. Prefer proper CA validation
   where possible.
+- **pgbouncer**: the pool intentionally avoids server startup parameters
+  (pgbouncer rejects them) - query timeouts are client-side plus per-request
+  `SET LOCAL` inside transactions. LISTEN/NOTIFY does not traverse pgbouncer
+  transaction pooling, so set `BLOCK_CACHE_LISTEN_DATABASE_URL` to the direct
+  postgres service for instant cache invalidation; without it the poll
+  backstop (default 3s) bounds staleness instead.
 - `RPC` is only needed for the `tokenomicsSupply*` GraphQL fields (they read
   the chain, not the DB).
 - **Block-aware response cache** (`BLOCK_CACHE`, default on): GraphQL POST
