@@ -16,4 +16,5 @@ jobs:
     uses: ixofoundation/ixo-github-actions/.github/workflows/node-ci-build.yml@main
     with:
       commit_sha: ${{ github.sha }}
+      package_manager: 'npm'
     secrets: inherit
