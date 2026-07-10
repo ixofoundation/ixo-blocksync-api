@@ -11,6 +11,10 @@ import {
 import { pool } from "./db.js";
 import { claimsRouter } from "./rest/claims.js";
 import { ipfsRouter } from "./rest/ipfs.js";
+import {
+  blockCacheMiddleware,
+  blockCacheStats,
+} from "./cache/block-cache.js";
 
 const limiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
@@ -44,11 +48,16 @@ app.get("/", (_req, res) => {
 app.get("/healthz", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ ok: true });
+    res.json({ ok: true, cache: blockCacheStats() });
   } catch (error: any) {
     res.status(503).json({ ok: false, error: error.message });
   }
 });
+
+// Block-aware response cache for GraphQL POSTs. express.json() parses the
+// body (grafserv accepts a framework-parsed req.body); limit matches
+// grafserv's maxRequestLength.
+app.use("/graphql", express.json({ limit: "500kb" }), blockCacheMiddleware);
 
 app.use(claimsRouter);
 app.use(ipfsRouter);

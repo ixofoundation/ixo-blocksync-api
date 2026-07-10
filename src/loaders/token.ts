@@ -68,6 +68,142 @@ const getTokenRetiredAmountSUM = async (
   return res.rows;
 };
 
+// ---------------------------------------------------------------------------
+// Pre-aggregated (name, collection) totals for the getTokensTotal* fields.
+//
+// Those fields only ever return per-(name, collection) sums, so summing in SQL
+// avoids transferring one row per token: the heaviest holder (47k token
+// balances) collapses from 47k rows + a JS fold into a handful of grouped
+// rows. Numerically identical to folding per-token rows: amounts/minted/
+// retired are non-negative, so a collection whose sums are all zero is
+// exactly a collection whose every token was zero - which the per-token fold
+// dropped; the same filter is applied to the sums.
+// ---------------------------------------------------------------------------
+
+export type AccountTokenTotal = {
+  address: string;
+  name: string;
+  collection: string;
+  contractAddress: string;
+  description: string;
+  image: string;
+  amount: string;
+  minted: string;
+  retired: string;
+};
+
+const getAccountTokenTotalsSql = `
+SELECT b."address", t."name", t."collection",
+       tc."contractAddress", tc."description", tc."image",
+       SUM(b."amount")::bigint  AS "amount",
+       SUM(b."minted")::bigint  AS "minted",
+       SUM(b."retired")::bigint AS "retired"
+FROM "TokenBalance" b
+JOIN "Token" t       ON t."id"   = b."tokenId"
+JOIN "TokenClass" tc ON tc."name" = t."name"
+WHERE b."address" = ANY($1::text[])
+  AND ($2::text IS NULL OR t."name" = $2)
+GROUP BY b."address", t."name", t."collection",
+         tc."contractAddress", tc."description", tc."image";
+`;
+
+// allEntityRetired variant: a token's retired amount is replaced by ALL
+// retirements ever (from any address) when this address minted it, else 0 -
+// the same per-token rule the JS fold applied, pushed into the aggregate.
+const getAccountTokenTotalsAllRetiredSql = `
+SELECT b."address", t."name", t."collection",
+       tc."contractAddress", tc."description", tc."image",
+       SUM(b."amount")::bigint AS "amount",
+       SUM(b."minted")::bigint AS "minted",
+       SUM(CASE WHEN b."minted" <> 0 THEN COALESCE(tr."total", 0) ELSE 0 END)::bigint AS "retired"
+FROM "TokenBalance" b
+JOIN "Token" t       ON t."id"   = b."tokenId"
+JOIN "TokenClass" tc ON tc."name" = t."name"
+LEFT JOIN (
+  SELECT "id", SUM("amount") AS "total"
+  FROM "TokenRetired"
+  WHERE "id" IN (SELECT "tokenId" FROM "TokenBalance" WHERE "address" = ANY($1::text[]))
+  GROUP BY "id"
+) tr ON tr."id" = b."tokenId"
+WHERE b."address" = ANY($1::text[])
+  AND ($2::text IS NULL OR t."name" = $2)
+GROUP BY b."address", t."name", t."collection",
+         tc."contractAddress", tc."description", tc."image";
+`;
+
+const getAccountTokenTotalsBatch = async (
+  addresses: string[],
+  name: string | null,
+  allEntityRetired: boolean
+): Promise<AccountTokenTotal[]> => {
+  if (!addresses.length) return [];
+  const res = await pool.query(
+    allEntityRetired
+      ? getAccountTokenTotalsAllRetiredSql
+      : getAccountTokenTotalsSql,
+    [addresses, name ?? null]
+  );
+  return res.rows;
+};
+
+type TotalsLoader = DataLoader<string, AccountTokenTotal[]>;
+
+const totalsKey = (
+  address: string,
+  name: string | null | undefined,
+  allEntityRetired: boolean | null | undefined
+): string => `${address}-${name || "NULL"}-${allEntityRetired ? "1" : "0"}`;
+
+// Same batching idea as the balances loader: all addresses requested in the
+// same tick collapse into one grouped query per distinct (name, retired-mode)
+// pair. Key: "<address>-<name|NULL>-<0|1>"; addresses never contain "-".
+const createTotalsLoader = (): TotalsLoader =>
+  new DataLoader<string, AccountTokenTotal[]>(
+    async (keys: readonly string[]) => {
+      const groups = new Map<
+        string,
+        { name: string | null; retired: boolean; addresses: Set<string> }
+      >();
+      const parsed = keys.map((key) => {
+        const firstSep = key.indexOf("-");
+        const lastSep = key.lastIndexOf("-");
+        const address = key.slice(0, firstSep);
+        const rawName = key.slice(firstSep + 1, lastSep);
+        const name = rawName === "NULL" ? null : rawName;
+        const retired = key.slice(lastSep + 1) === "1";
+        const groupKey = `${name ?? "NULL"}-${retired ? "1" : "0"}`;
+        let group = groups.get(groupKey);
+        if (!group) {
+          group = { name, retired, addresses: new Set() };
+          groups.set(groupKey, group);
+        }
+        group.addresses.add(address);
+        return { address, groupKey };
+      });
+
+      const rowsByKey = new Map<string, AccountTokenTotal[]>();
+      await Promise.all(
+        [...groups.entries()].map(async ([groupKey, group]) => {
+          const rows = await getAccountTokenTotalsBatch(
+            [...group.addresses],
+            group.name,
+            group.retired
+          );
+          for (const row of rows) {
+            const key = `${row.address}|${groupKey}`;
+            const list = rowsByKey.get(key);
+            if (list) list.push(row);
+            else rowsByKey.set(key, [row]);
+          }
+        })
+      );
+
+      return parsed.map(
+        ({ address, groupKey }) => rowsByKey.get(`${address}|${groupKey}`) ?? []
+      );
+    }
+  );
+
 // --- per-batch balances DataLoader (mirrors createGetAccountTransactionsLoader) ---
 
 type BalancesLoader = DataLoader<string, AccountTokenBalance[]>;
@@ -165,35 +301,40 @@ const getAccountTokens = async (
   return tokens;
 };
 
+// getTokensTotalByAddress consumes the SQL-aggregated (name, collection)
+// sums directly - identical output shape to the old fold over per-token rows.
 const getTokensTotalByAddress = async (
-  loader: BalancesLoader,
+  loader: TotalsLoader,
   address: string,
   name?: string | null,
   allEntityRetired?: boolean | null
 ) => {
-  const tokens = await getAccountTokens(loader, address, name, allEntityRetired);
-  Object.keys(tokens).forEach((key) => {
-    const newTokens: any = {};
-    Object.values(tokens[key].tokens).forEach((t: any) => {
-      if (!newTokens[t.collection]) {
-        newTokens[t.collection] = {
-          amount: t.amount,
-          minted: t.minted,
-          retired: t.retired,
-        };
-      } else {
-        newTokens[t.collection].amount += t.amount;
-        newTokens[t.collection].minted += t.minted;
-        newTokens[t.collection].retired += t.retired;
-      }
-    });
-    tokens[key].tokens = newTokens;
-  });
+  if (!address) return {};
+  const rows = await loader.load(totalsKey(address, name, allEntityRetired));
+
+  const tokens: any = {};
+  for (const row of rows) {
+    const amount = Number(row.amount);
+    const minted = Number(row.minted);
+    const retired = Number(row.retired);
+    // a collection whose sums are all zero is one whose every token was
+    // all-zero - the per-token fold dropped those tokens, so drop the entry
+    if (amount === 0 && minted === 0 && retired === 0) continue;
+    if (!tokens[row.name]) {
+      tokens[row.name] = {
+        contractAddress: row.contractAddress,
+        description: row.description,
+        image: row.image,
+        tokens: {},
+      };
+    }
+    tokens[row.name].tokens[row.collection] = { amount, minted, retired };
+  }
   return tokens;
 };
 
 const getTokensTotalForEntities = async (
-  loader: BalancesLoader,
+  loader: TotalsLoader,
   address: string,
   name?: string | null,
   allEntityRetired?: boolean | null
@@ -216,7 +357,7 @@ const getTokensTotalForEntities = async (
 };
 
 const getTokensTotalForCollection = async (
-  loader: BalancesLoader,
+  loader: TotalsLoader,
   did: string,
   name?: string | null,
   allEntityRetired?: boolean | null
@@ -241,7 +382,7 @@ const getTokensTotalForCollection = async (
 };
 
 const getTokensTotalForCollectionAmounts = async (
-  loader: BalancesLoader,
+  loader: TotalsLoader,
   did: string,
   name?: string | null,
   allEntityRetired?: boolean | null
@@ -286,16 +427,29 @@ export type TokenQuerySpec = readonly [
   boolean | null | undefined
 ];
 
-const runBatch = (
+// getAccountTokens (per-token detail) keeps the row-level balances loader;
+// the four Total fields share a per-batch totals loader over the SQL sums.
+export const batchGetAccountTokens = (
+  specs: ReadonlyArray<any>
+): Promise<any[]> => {
+  const loader = createBalancesLoader();
+  return Promise.all(
+    specs.map(([key, name, allEntityRetired]: TokenQuerySpec) =>
+      getAccountTokens(loader, key, name, allEntityRetired)
+    )
+  );
+};
+
+const runTotalsBatch = (
   specs: ReadonlyArray<any>,
   fn: (
-    loader: BalancesLoader,
+    loader: TotalsLoader,
     key: string,
     name?: string | null,
     allEntityRetired?: boolean | null
   ) => Promise<any>
 ): Promise<any[]> => {
-  const loader = createBalancesLoader();
+  const loader = createTotalsLoader();
   return Promise.all(
     specs.map(([key, name, allEntityRetired]: TokenQuerySpec) =>
       fn(loader, key, name, allEntityRetired)
@@ -303,18 +457,15 @@ const runBatch = (
   );
 };
 
-export const batchGetAccountTokens = (specs: ReadonlyArray<any>) =>
-  runBatch(specs, getAccountTokens);
-
 export const batchGetTokensTotalByAddress = (specs: ReadonlyArray<any>) =>
-  runBatch(specs, getTokensTotalByAddress);
+  runTotalsBatch(specs, getTokensTotalByAddress);
 
 export const batchGetTokensTotalForEntities = (specs: ReadonlyArray<any>) =>
-  runBatch(specs, getTokensTotalForEntities);
+  runTotalsBatch(specs, getTokensTotalForEntities);
 
 export const batchGetTokensTotalForCollection = (specs: ReadonlyArray<any>) =>
-  runBatch(specs, getTokensTotalForCollection);
+  runTotalsBatch(specs, getTokensTotalForCollection);
 
 export const batchGetTokensTotalForCollectionAmounts = (
   specs: ReadonlyArray<any>
-) => runBatch(specs, getTokensTotalForCollectionAmounts);
+) => runTotalsBatch(specs, getTokensTotalForCollectionAmounts);

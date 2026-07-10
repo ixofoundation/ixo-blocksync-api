@@ -1,5 +1,5 @@
 import { extendSchema, gql } from "postgraphile/utils";
-import { loadOne, access, constant } from "postgraphile/grafast";
+import { loadOne, constant } from "postgraphile/grafast";
 import {
   loadIidPassthrough,
   loadResolvedEntities,
@@ -33,12 +33,14 @@ const RESOLVED_FIELDS = ["service", "linkedResource", "settings"] as const;
 export const EntityPlugin = extendSchema(() => {
   const entityPlans: Record<string, any> = {};
   for (const field of PASSTHROUGH_FIELDS) {
+    // .get() (not access()) so grafast records the accessed attribute and the
+    // loader can prune its SELECT to the columns the operation actually reads.
     entityPlans[field] = ($entity: any) =>
-      access(loadOne($entity.get("id"), loadIidPassthrough), field);
+      loadOne($entity.get("id"), loadIidPassthrough).get(field);
   }
   for (const field of RESOLVED_FIELDS) {
     entityPlans[field] = ($entity: any) =>
-      access(loadOne($entity.get("id"), loadResolvedEntities), field);
+      loadOne($entity.get("id"), loadResolvedEntities).get(field);
   }
 
   return {

@@ -37,8 +37,17 @@ Notes:
   where possible.
 - `RPC` is only needed for the `tokenomicsSupply*` GraphQL fields (they read
   the chain, not the DB).
-- There is **no response caching**: clients get fresh data on every request
-  (a transaction indexed by ixo-blocksync is visible on the very next query).
+- **Block-aware response cache** (`BLOCK_CACHE`, default on): GraphQL POST
+  responses are cached in-process and the entire cache is flushed the moment
+  the indexer commits a block (pg_notify trigger on `"Chain"` - apply
+  `scripts/block-notify-trigger.sql` once per database - plus a
+  `BLOCK_CACHE_BACKSTOP_MS` poll as a safety net). Because the database only
+  changes when a block commits, a cached response can never be staler than
+  the database itself: someone who transacts and immediately queries still
+  sees their transaction, since that block flushed the cache. Mutations
+  (none exist), `tokenomics*` operations (chain-RPC backed) and responses
+  over `BLOCK_CACHE_MAX_ENTRY_BYTES` are never cached. `X-Cache: HIT|MISS`
+  is set on cacheable requests; `/healthz` reports cache stats.
 
 ## Run
 

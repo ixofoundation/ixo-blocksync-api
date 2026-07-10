@@ -4,6 +4,7 @@ import { grafserv } from "postgraphile/grafserv/express/v4";
 import { preset } from "./preset.js";
 import { app } from "./app.js";
 import { PORT } from "./env.js";
+import { startBlockCacheInvalidator } from "./cache/block-cache.js";
 
 const pgl = postgraphile(preset);
 const serv = pgl.createServ(grafserv);
@@ -14,6 +15,8 @@ server.on("error", (err) => {
 });
 
 await serv.addTo(app, server);
+
+startBlockCacheInvalidator();
 
 server.listen(PORT, () => {
   console.log(`ixo-blocksync-api listening on ${PORT}`);
