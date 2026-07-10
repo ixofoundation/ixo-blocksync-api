@@ -57,6 +57,10 @@ npm run build && npm start
 - **`nodeId` and connection cursor encodings differ** from v4. Field names and
   shapes are unchanged; only the opaque values differ, so don't persist them
   across the migration.
+- `/api/ipfs/:cid` serves non-inline-safe content types (e.g. `image/svg+xml`,
+  XML) as `application/octet-stream` with `nosniff` + a sandboxing CSP, so
+  proxied IPFS content can never execute scripts on the API origin (v4 only
+  blocked `text/html`). Common image/json/pdf types are unaffected.
 - `/api/claims/...` no longer triggers the cellnode schema-type fetch (that is
   a write; the indexer's cron owns it). The "not loaded yet" response contract
   is unchanged.
