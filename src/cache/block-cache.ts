@@ -2,6 +2,7 @@ import pg from 'pg';
 import { createHash } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { pool } from '../db.js';
+import { logger } from '../logger.js';
 import { BLOCK_CACHE, BLOCK_CACHE_CHANNEL, BLOCK_CACHE_LISTEN_DATABASE_URL, BLOCK_CACHE_MAX_ENTRIES, BLOCK_CACHE_MAX_ENTRY_BYTES, BLOCK_CACHE_BACKSTOP_MS, DATABASE_USE_SSL } from '../env.js';
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ export const startBlockCacheInvalidator = (): void => {
 			...(DATABASE_USE_SSL ? { ssl: { rejectUnauthorized: false } } : {}),
 		});
 		client.on('error', err => {
-			console.error('block-cache: LISTEN connection error:', err.message);
+			logger.error({ err: err.message }, 'block-cache: LISTEN connection error');
 			clearBlockCache();
 			try {
 				client.end().catch(() => {});
@@ -170,9 +171,9 @@ export const startBlockCacheInvalidator = (): void => {
 			attempts = 0;
 			// anything cached while we weren't listening is unverifiable - drop it
 			clearBlockCache();
-			console.log(`block-cache: listening for new blocks on "${BLOCK_CACHE_CHANNEL}"`);
+			logger.info(`block-cache: listening for new blocks on "${BLOCK_CACHE_CHANNEL}"`);
 		} catch (err: any) {
-			console.error('block-cache: LISTEN connect failed:', err.message);
+			logger.error({ err: err.message }, 'block-cache: LISTEN connect failed');
 			scheduleReconnect();
 		}
 	};
