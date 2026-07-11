@@ -15,6 +15,7 @@ import {
   blockCacheMiddleware,
   blockCacheStats,
 } from "./cache/block-cache.js";
+import { requestLogMiddleware } from "./request-log.js";
 
 const limiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
@@ -29,6 +30,9 @@ app.set("trust proxy", TRUST_PROXY);
 
 app.use(cors());
 app.use(compression());
+// Request analytics: after compression() so byte counts are uncompressed
+// payload sizes; before the rate limiter so 429s are logged too.
+app.use(requestLogMiddleware);
 // CSP disabled so Ruru (GraphiQL) can run; the API itself serves JSON only.
 app.use(
   helmet({

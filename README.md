@@ -55,6 +55,29 @@ Notes:
   over `BLOCK_CACHE_MAX_ENTRY_BYTES` are never cached. `X-Cache: HIT|MISS`
   is set on cacheable requests; `/healthz` reports cache stats.
 
+## Request analytics logging
+
+Every request (except `/` and `/healthz` probes) emits one structured JSON
+line on stdout via [pino](https://github.com/pinojs/pino), ready for any log
+pipeline (Loki/Grafana, BigQuery, `kubectl logs | jq`):
+
+```json
+{"level":"info","time":"2026-07-11T09:00:00.000Z","method":"POST","path":"/graphql","status":200,"durationMs":43.2,"bytes":26543,"ip":"1.2.3.4","ua":"node-fetch","gql":{"op":"GetEntityById","type":"query","roots":["entity"],"hash":"ab12cd34ef56ab12","cache":"HIT","errors":false},"msg":"request"}
+```
+
+- `gql.roots` are the operation's top-level fields — the natural dimension for
+  per-resolver latency/volume aggregation; `gql.hash` (sha256 of the query
+  text) groups identical documents; `gql.cache` is `HIT`/`MISS` from the block
+  cache or `BYPASS` for uncacheable operations; `gql.errors` flags GraphQL
+  errors (headers-based heuristic — errors precede data in the payload).
+- `bytes` is the uncompressed response size (logging sits inside
+  compression). Variables are deliberately never logged.
+- Responses with status ≥ 400 and requests slower than `LOG_SLOW_MS`
+  (default 1s) log at `warn`, 5xx at `error`, so slow/failing traffic can be
+  alerted on by level alone.
+- `LOG_LEVEL` controls verbosity (`silent` disables). Pretty-print locally
+  with `npm run dev | npx pino-pretty`.
+
 ## Run
 
 ```bash

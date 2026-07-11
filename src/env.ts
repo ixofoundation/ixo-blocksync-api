@@ -21,6 +21,11 @@ export const STATEMENT_TIMEOUT_MS = num(process.env.STATEMENT_TIMEOUT_MS, 8000);
 export const RATE_LIMIT_WINDOW_MS = num(process.env.RATE_LIMIT_WINDOW_MS, 1000);
 export const RATE_LIMIT_MAX = num(process.env.RATE_LIMIT_MAX, 200);
 
+// --- request analytics logging ---
+export const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+// requests at least this slow are logged at warn so they stand out
+export const LOG_SLOW_MS = num(process.env.LOG_SLOW_MS, 1000);
+
 // express `trust proxy`: numeric hop count or string spec
 const trustProxyRaw = process.env.TRUST_PROXY ?? '1';
 export const TRUST_PROXY: number | string = Number.isFinite(Number(trustProxyRaw)) ? Number(trustProxyRaw) : trustProxyRaw;

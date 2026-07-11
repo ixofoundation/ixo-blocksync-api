@@ -1,5 +1,6 @@
 import pg from "pg";
 import { DATABASE_URL, DATABASE_USE_SSL, DB_POOL_MAX } from "./env.js";
+import { logger } from "./logger.js";
 
 // Single shared pool: PostGraphile (via makePgService) and the custom loaders
 // all draw from here, so total connections per instance are capped by
@@ -26,5 +27,5 @@ export const pool = new pg.Pool({
 // An errored idle client must never crash the process (Cloudflare-tunnel /
 // LB idle drops surface here).
 pool.on("error", (err) => {
-  console.error("pg pool error (idle client):", err.message);
+  logger.error({ err: err.message }, "pg pool error (idle client)");
 });
