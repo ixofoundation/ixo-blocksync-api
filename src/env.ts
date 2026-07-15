@@ -18,6 +18,16 @@ export const DATABASE_SCHEMA = process.env.DATABASE_SCHEMA || 'public';
 export const DB_POOL_MAX = num(process.env.DB_POOL_MAX, 20);
 export const STATEMENT_TIMEOUT_MS = num(process.env.STATEMENT_TIMEOUT_MS, 8000);
 
+// --- chain events (blocksync-core database) ---
+// Optional read access to the blocksync-core database. When set, the API
+// exposes the standard `eventCores` connection over the EventCore table only
+// (raw per-block chain events; see CoreEventsOnlyPlugin) so consumers like
+// ixo-domain-indexer can poll domain changes with a durable id cursor. When
+// unset the connection is omitted from the schema.
+export const CORE_DATABASE_URL = process.env.CORE_DATABASE_URL || '';
+export const CORE_DATABASE_USE_SSL = Number(process.env.CORE_DATABASE_USE_SSL ?? process.env.DATABASE_USE_SSL ?? '0') || 0;
+export const CORE_DB_POOL_MAX = num(process.env.CORE_DB_POOL_MAX, 5);
+
 export const RATE_LIMIT_WINDOW_MS = num(process.env.RATE_LIMIT_WINDOW_MS, 1000);
 export const RATE_LIMIT_MAX = num(process.env.RATE_LIMIT_MAX, 200);
 
