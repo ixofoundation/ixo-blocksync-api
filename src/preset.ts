@@ -19,6 +19,8 @@ import { EntityPlugin } from "./plugins/entity.js";
 import { TokenPlugin } from "./plugins/token.js";
 import { ClaimsPlugin } from "./plugins/claims.js";
 import { TokenomicsPlugin } from "./plugins/tokenomics.js";
+import { CoreEventsOnlyPlugin } from "./plugins/core-events-only.js";
+import { corePool } from "./core-db.js";
 
 // Mirrors ixo-blocksync's PostGraphile v4 options through the official V4
 // compatibility preset so the generated schema keeps the v4 shape existing
@@ -57,12 +59,28 @@ export const preset: GraphileConfig.Preset = {
     TokenPlugin,
     ClaimsPlugin,
     TokenomicsPlugin,
+    // No-op unless the "core" service below is configured.
+    CoreEventsOnlyPlugin,
   ],
   pgServices: [
     makePgService({
       pool,
       schemas: [DATABASE_SCHEMA],
     }),
+    // Optional second service: the blocksync-core database, scoped to the
+    // EventCore table only (CoreEventsOnlyPlugin) and exposed as the plain
+    // `eventCores` connection. Consumers (e.g. ixo-domain-indexer) poll it
+    // with filter/orderBy for per-block chain events; omitted entirely when
+    // CORE_DATABASE_URL is not set, so they get a clear "Cannot query field".
+    ...(corePool
+      ? [
+          makePgService({
+            name: "core",
+            pool: corePool,
+            schemas: ["public"],
+          }),
+        ]
+      : []),
   ],
   grafserv: {
     port: PORT,
