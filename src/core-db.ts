@@ -26,3 +26,12 @@ export const corePool: pg.Pool | null = CORE_DATABASE_URL
 corePool?.on("error", (err) => {
   logger.error({ err: err.message }, "core pg pool error (idle client)");
 });
+
+// Lifetime per-client error listener — same reasoning as db.ts: pool-level
+// "error" covers idle clients only; a connection killed while checked out
+// otherwise crashes the process via an unhandled Client 'error'.
+corePool?.on("connect", (client) => {
+  client.on("error", (err) => {
+    logger.error({ err: err.message }, "core pg client error (checked-out client)");
+  });
+});
