@@ -29,3 +29,18 @@ export const pool = new pg.Pool({
 pool.on("error", (err) => {
   logger.error({ err: err.message }, "pg pool error (idle client)");
 });
+
+// pool.on("error") only covers IDLE clients: pg-pool detaches its own error
+// listener while a client is checked out, and PostGraphile holds clients
+// across awaits between statements. A connection killed in that window
+// emits 'error' on the bare Client — unhandled, it kills the whole process
+// (mainnet Oct 17–19 2026: 39 restarts on "Connection terminated
+// unexpectedly"). This listener is attached once per client and lives for
+// the client's whole life, so the event always has a handler; an in-flight
+// query still rejects through pg's own path and the pool discards the
+// broken client on release.
+pool.on("connect", (client) => {
+  client.on("error", (err) => {
+    logger.error({ err: err.message }, "pg client error (checked-out client)");
+  });
+});
