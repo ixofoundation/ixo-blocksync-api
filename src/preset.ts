@@ -96,6 +96,12 @@ export const preset: GraphileConfig.Preset = {
       // Same per-request statement timeout the v4 API applies via pgSettings.
       pgSettings: {
         statement_timeout: String(STATEMENT_TIMEOUT_MS),
+        // Plan every statement with its bind values. A generic plan cannot
+        // prove the partial GIN index on Message.value applies when the
+        // typeUrl clause arrives as a parameter, so it walks the primary key
+        // instead and hits the statement timeout (mainnet, 2026-10-20: every
+        // history query from Trace timed out at 8 s; 0.4 s with this).
+        plan_cache_mode: "force_custom_plan",
       },
     }),
   },

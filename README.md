@@ -24,6 +24,55 @@ the existing `ixo-blocksync` v4 GraphQL API.
 | `GET /` | Plain liveness text ("API is Running") |
 | `GET /healthz` | Liveness with a DB round-trip |
 
+## Searching inside `Message.value` (JSONB containment)
+
+"Every message that mentions object X" is an index lookup, **provided the
+query also excludes IBC light-client headers**. `Message.value` carries a
+partial GIN index (`Message_value_nonibc_gin_idx`, `jsonb_path_ops`, defined
+in ixo-blocksync's migrations) that skips `/ibc.core.client.v1.MsgUpdateClient`:
+those rows are 86% of the table's bytes on mainnet and hold nothing searchable.
+Postgres only uses a partial index when the query implies its predicate, so
+send the `typeUrl` clause every time:
+
+```graphql
+query MessagesMentioning($id: String!) {
+  messages(
+    filter: {
+      typeUrl: { notEqualTo: "/ibc.core.client.v1.MsgUpdateClient" }
+      value: { contains: { id: $id } }
+    }
+    first: 100
+    orderBy: ID_DESC
+  ) {
+    totalCount
+    nodes { id typeUrl transactionHash transactionByTransactionHash { height time } }
+  }
+}
+```
+
+- Shapes that use the index: `{ id: "<did>" }`, `{ entity: "<did>" }`,
+  `{ collectionId: "<id>" }`, and `{ msgs: [{ id: "<did>" }] }` for messages
+  wrapped in an authz `MsgExec`. Only `contains` is indexed; `containsKey` and
+  `containsAllKeys` on `Message.value` are not.
+- Batch several objects in one document with aliases (HTTP query batching is
+  not available, see below).
+- Every GraphQL transaction runs with `plan_cache_mode = force_custom_plan`
+  (`src/preset.ts`), so Postgres plans each statement with its bind values. A
+  generic plan cannot prove the partial index's predicate from a `$n` parameter,
+  falls back to walking the primary key, and hits the statement timeout: on
+  2026-10-20 every history query from Trace took 8 s and failed; 0.4 s with
+  custom plans. The `blocksync` role carries the same setting in all three
+  environments as a backstop.
+- **Without the `typeUrl` clause the same query is a sequential scan of the
+  whole table**, which times out on mainnet. IBC transfers, packets and
+  acknowledgements are different types and are fully indexed; the excluded
+  header rows stay queryable by `typeUrl`, height and sender.
+- Measured on devnet (84k messages): 4 s → under 5 ms in the database, about
+  250 ms end to end, stable at 20 concurrent requests.
+
+A dedicated message-references table is planned to replace this index with an
+exact lookup (Linear IXO-5676).
+
 ## Configuration
 
 Copy `.env.example` to `.env`. `DATABASE_URL` is the only required variable —
