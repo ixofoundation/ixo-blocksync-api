@@ -56,6 +56,13 @@ query MessagesMentioning($id: String!) {
   `containsAllKeys` on `Message.value` are not.
 - Batch several objects in one document with aliases (HTTP query batching is
   not available, see below).
+- Every GraphQL transaction runs with `plan_cache_mode = force_custom_plan`
+  (`src/preset.ts`), so Postgres plans each statement with its bind values. A
+  generic plan cannot prove the partial index's predicate from a `$n` parameter,
+  falls back to walking the primary key, and hits the statement timeout: on
+  2026-10-20 every history query from Trace took 8 s and failed; 0.4 s with
+  custom plans. The `blocksync` role carries the same setting in all three
+  environments as a backstop.
 - **Without the `typeUrl` clause the same query is a sequential scan of the
   whole table**, which times out on mainnet. IBC transfers, packets and
   acknowledgements are different types and are fully indexed; the excluded
