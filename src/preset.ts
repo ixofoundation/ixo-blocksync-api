@@ -20,6 +20,7 @@ import { TokenPlugin } from "./plugins/token.js";
 import { ClaimsPlugin } from "./plugins/claims.js";
 import { TokenomicsPlugin } from "./plugins/tokenomics.js";
 import { CoreEventsOnlyPlugin } from "./plugins/core-events-only.js";
+import { RequestErrorsPlugin } from "./plugins/request-errors.js";
 import { corePool } from "./core-db.js";
 
 // Mirrors ixo-blocksync's PostGraphile v4 options through the official V4
@@ -61,6 +62,8 @@ export const preset: GraphileConfig.Preset = {
     TokenomicsPlugin,
     // No-op unless the "core" service below is configured.
     CoreEventsOnlyPlugin,
+    // Summarises execution-result errors onto res.locals for request-log.ts.
+    RequestErrorsPlugin,
   ],
   pgServices: [
     makePgService({

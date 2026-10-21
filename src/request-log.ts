@@ -3,6 +3,7 @@ import { parse, type OperationDefinitionNode } from 'graphql';
 import type { RequestHandler } from 'express';
 import { logger } from './logger.js';
 import { LOG_SLOW_MS } from './env.js';
+import type { GqlErrorSummary } from './plugins/request-errors.js';
 
 // ---------------------------------------------------------------------------
 // Per-request analytics log: one JSON line per request with timing, size and
@@ -73,10 +74,14 @@ export const requestLogMiddleware: RequestHandler = (req, res, next) => {
 	const path = req.path;
 	const start = performance.now();
 	let bytes = 0;
-	// First bytes of the response, used to detect GraphQL errors: graphql-js
-	// puts "errors" before "data" in the result object, so an errored response
-	// starts {"errors": - full inspection would mean re-buffering/parsing
-	// every response, which is not worth it for a log line.
+	// First bytes of the response - a FALLBACK GraphQL-error detector only.
+	// Execution results are built { data, errors } (data first, see
+	// grafast/dist/prepare.js), so a partial failure (data plus an errors
+	// array) does not show "errors" in the head at all. Those are recorded by
+	// RequestErrorsPlugin (plugins/request-errors.ts) from the execution result
+	// onto res.locals.gqlErrors. Only requests grafserv rejects before
+	// execution (parse/validation errors, a 400 whose body starts {"errors":)
+	// never reach that hook, and the head check catches them.
 	let head: string | null = null;
 
 	const record = (chunk: unknown) => {
@@ -122,14 +127,24 @@ export const requestLogMiddleware: RequestHandler = (req, res, next) => {
 			const hash = createHash('sha256').update(body.query).digest('hex').slice(0, 16);
 			const operationName = typeof body.operationName === 'string' ? body.operationName : null;
 			const info = gqlInfoFor(body.query, operationName, hash);
-			entry.gql = {
+			const summary = res.locals.gqlErrors as GqlErrorSummary | undefined;
+			const errorCount = summary?.count ?? 0;
+			const gql: Record<string, unknown> = {
 				op: info?.op ?? operationName,
 				type: info?.type ?? null,
 				roots: info?.roots ?? [],
 				hash,
 				cache: (res.getHeader('x-cache') as string | undefined) ?? 'BYPASS',
-				errors: head !== null && head.includes('"errors"'),
+				// Stays a boolean: dashboards/alerts filter on gql_errors="true".
+				errors: errorCount > 0 || (head !== null && head.includes('"errors"')),
 			};
+			if (summary && errorCount > 0) {
+				gql.errorCount = errorCount;
+				gql.errorCodes = summary.codes;
+				gql.errorPath = summary.path;
+				gql.errorMessage = summary.message;
+			}
+			entry.gql = gql;
 		}
 
 		if (res.statusCode >= 500) logger.error(entry, 'request');
