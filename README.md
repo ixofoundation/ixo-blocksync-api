@@ -117,8 +117,21 @@ pipeline (Loki/Grafana, BigQuery, `kubectl logs | jq`):
 - `gql.roots` are the operation's top-level fields — the natural dimension for
   per-resolver latency/volume aggregation; `gql.hash` (sha256 of the query
   text) groups identical documents; `gql.cache` is `HIT`/`MISS` from the block
-  cache or `BYPASS` for uncacheable operations; `gql.errors` flags GraphQL
-  errors (headers-based heuristic — errors precede data in the payload).
+  cache or `BYPASS` for uncacheable operations; `gql.errors` (boolean) flags
+  any GraphQL error, including partial failures where `data` is returned
+  alongside an `errors` array.
+- When execution produced errors, the line also carries `gql.errorCount`,
+  `gql.errorCodes` (distinct codes, max 5 — the Postgres SQLSTATE for
+  database errors, e.g. `57014` statement timeout, otherwise
+  `extensions.code`, else `unknown`), `gql.errorPath` (first error's path,
+  dot-joined) and `gql.errorMessage` (first error's message, ≤160 chars).
+  These come from the execution result (`RequestErrorsPlugin`,
+  `src/plugins/request-errors.ts`) because grafast serialises `data` before
+  `errors`, so the response body's first bytes can't reveal a partial
+  failure. Requests rejected before execution (parse/validation errors, 400)
+  set only `gql.errors`, detected from the start of the response body.
+  Stacks are never logged. Example (truncated):
+  `"gql":{…,"errors":true,"errorCount":1,"errorCodes":["57014"],"errorPath":"claimCollections","errorMessage":"canceling statement due to statement timeout"}`
 - `bytes` is the uncompressed response size (logging sits inside
   compression). Variables are deliberately never logged.
 - Responses with status ≥ 400 and requests slower than `LOG_SLOW_MS`
